@@ -1,10 +1,10 @@
 # slurm-queue-predictor
 
 This is a work in progress. It will:
-** Extract all job data from slurm and store it as a parquet file
-** Preprocess the slurm job data for training
-** Train a model to predict slurm queue times
-** Make predictions using the model and newly submitted jobs
+* Extract all job data from slurm and store it as a parquet file
+* Preprocess the slurm job data for training
+* Train a model to predict slurm queue times
+* Make predictions using the model and newly submitted jobs
 
 ## Usage (so far):
 
