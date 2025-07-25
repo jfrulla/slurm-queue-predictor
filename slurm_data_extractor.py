@@ -97,16 +97,21 @@ class SlurmDataExtractor:
     
     def get_job_data_query(self) -> str:
         """Build SQL query to extract job data."""
-        # Main job data query - adjust column names based on your SLURM DB schema
-        base_query = """
+        # Get cluster name from config to build correct table name
+        db_config = self.config['database']
+        cluster_name = db_config.get('cluster_name', 'cluster')
+        job_table = f"{cluster_name}_job_table"
+        
+        # Main job data query - using cluster-specific table name
+        base_query = f"""
         SELECT 
             job_db_inx,
             jobid,
             jobname,
-            partition_name,
+            `partition`,
             account,
-            user_name,
-            group_name,
+            user,
+            `group`,
             state,
             exit_code,
             priority,
@@ -120,11 +125,11 @@ class SlurmDataExtractor:
             cpus_alloc,
             mem_req,
             nodes_alloc,
-            node_inx,
+            nodelist,
             work_dir,
             tres_alloc,
             tres_req
-        FROM job_table
+        FROM {job_table}
         WHERE deleted = 0
         """
         
@@ -133,10 +138,10 @@ class SlurmDataExtractor:
         conditions = []
         
         if extraction_config.get('start_date'):
-            conditions.append(f"time_submit >= '{extraction_config['start_date']}'")
+            conditions.append(f"time_submit >= UNIX_TIMESTAMP('{extraction_config['start_date']}')")
         
         if extraction_config.get('end_date'):
-            conditions.append(f"time_submit <= '{extraction_config['end_date']}'")
+            conditions.append(f"time_submit <= UNIX_TIMESTAMP('{extraction_config['end_date']}')")
         
         if conditions:
             base_query += " AND " + " AND ".join(conditions)

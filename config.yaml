@@ -3,8 +3,9 @@ database:
   host: "slurm-db-server.example.com"
   port: 3306
   database: "slurm_acct_db"
-  username: "slurm_user"
+  username: "slurm_readonly_user"
   password: "your_password_here"
+  cluster_name: "cluster1"
   
 # Data extraction settings
 extraction:
