@@ -179,38 +179,7 @@ class SlurmDataExtractor:
             self.logger.error(f"Error extracting job data: {e}")
             raise
     
-    def preprocess_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Preprocess extracted data for ML usage."""
-        if df.empty:
-            return df
-        
-        self.logger.info("Preprocessing job data...")
-        
-        # Convert timestamp columns to datetime
-        timestamp_columns = ['time_submit', 'time_eligible', 'time_start', 'time_end']
-        for col in timestamp_columns:
-            if col in df.columns:
-                df[col] = pd.to_datetime(df[col], unit='s', errors='coerce')
-        
-        # Calculate derived features
-        if 'time_start' in df.columns and 'time_submit' in df.columns:
-            df['queue_time'] = (df['time_start'] - df['time_submit']).dt.total_seconds()
-        
-        if 'time_end' in df.columns and 'time_start' in df.columns:
-            df['runtime'] = (df['time_end'] - df['time_start']).dt.total_seconds()
-        
-        # Extract exit code information
-        if 'exit_code' in df.columns:
-            df['exit_status'] = df['exit_code'].astype(str).str.split(':').str[0].astype(int, errors='ignore')
-        
-        # Add time-based features
-        if 'time_submit' in df.columns:
-            df['submit_hour'] = df['time_submit'].dt.hour
-            df['submit_day_of_week'] = df['time_submit'].dt.dayofweek
-            df['submit_month'] = df['time_submit'].dt.month
-        
-        self.logger.info("Data preprocessing completed")
-        return df
+
     
     def save_data(self, df: pd.DataFrame, filename: Optional[str] = None):
         """Save extracted data to file."""
@@ -264,10 +233,7 @@ class SlurmDataExtractor:
                 self.logger.warning("No data extracted")
                 return
             
-            # Preprocess data
-            df = self.preprocess_data(df)
-            
-            # Save data
+            # Save raw data
             self.save_data(df, output_filename)
             
             self.logger.info("Data extraction process completed successfully")

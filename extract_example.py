@@ -21,7 +21,6 @@ def main():
     # Option 2: Step-by-step extraction (for more control)
     # extractor.connect_to_database()
     # df = extractor.extract_job_data()
-    # df = extractor.preprocess_data(df)
     # extractor.save_data(df, "custom_filename.parquet")
 
 if __name__ == "__main__":
