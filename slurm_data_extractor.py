@@ -13,6 +13,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
+from urllib.parse import quote_plus
 
 import yaml
 import pandas as pd
@@ -72,9 +73,16 @@ class SlurmDataExtractor:
         """Establish connection to SLURM database."""
         db_config = self.config['database']
         
+        # URL-encode username and password to handle special characters like @, :, etc.
+        username = quote_plus(str(db_config['username']))
+        password = quote_plus(str(db_config['password']))
+        host = db_config['host']
+        port = db_config['port']
+        database = db_config['database']
+        
         connection_string = (
-            f"mysql+pymysql://{db_config['username']}:{db_config['password']}"
-            f"@{db_config['host']}:{db_config['port']}/{db_config['database']}"
+            f"mysql+pymysql://{username}:{password}"
+            f"@{host}:{port}/{database}"
         )
         
         try:
