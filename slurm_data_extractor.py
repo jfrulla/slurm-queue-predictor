@@ -102,7 +102,7 @@ class SlurmDataExtractor:
         cluster_name = db_config.get('cluster_name', 'cluster')
         job_table = f"{cluster_name}_job_table"
         
-        # Main job data query - using cluster-specific table name and correct column names
+        # Main job data query
         base_query = f"""
         SELECT 
             job_db_inx,
