@@ -1,0 +1,25 @@
+# SLURM Database Configuration
+database:
+  host: "slurm-db-server.example.com"
+  port: 3306
+  database: "slurm_acct_db"
+  username: "slurm_user"
+  password: "your_password_here"
+  
+# Data extraction settings
+extraction:
+  # Output file format: 'csv', 'parquet', or 'json'
+  output_format: "parquet"
+  # Output directory for data files
+  output_dir: "data"
+  # Batch size for large queries (number of records per batch)
+  batch_size: 10000
+  # Date range for job extraction (optional, leave empty for all jobs)
+  start_date: null  # Format: "YYYY-MM-DD" or null for no limit
+  end_date: null    # Format: "YYYY-MM-DD" or null for no limit
+
+# Logging configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true
+  log_file: "logs/slurm_extractor.log" 
