@@ -102,16 +102,16 @@ class SlurmDataExtractor:
         cluster_name = db_config.get('cluster_name', 'cluster')
         job_table = f"{cluster_name}_job_table"
         
-        # Main job data query - using cluster-specific table name
+        # Main job data query - using cluster-specific table name and correct column names
         base_query = f"""
         SELECT 
             job_db_inx,
-            jobid,
-            jobname,
+            id_job,
+            job_name,
             `partition`,
             account,
-            user,
-            `group`,
+            id_user,
+            id_group,
             state,
             exit_code,
             priority,
@@ -122,13 +122,27 @@ class SlurmDataExtractor:
             time_suspended,
             timelimit,
             cpus_req,
-            cpus_alloc,
             mem_req,
             nodes_alloc,
             nodelist,
             work_dir,
             tres_alloc,
-            tres_req
+            tres_req,
+            id_assoc,
+            id_qos,
+            array_task_str,
+            array_max_tasks,
+            constraints,
+            derived_ec,
+            derived_es,
+            flags,
+            het_job_id,
+            het_job_offset,
+            wckey,
+            std_err,
+            std_in,
+            std_out,
+            submit_line
         FROM {job_table}
         WHERE deleted = 0
         """
