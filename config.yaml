@@ -14,7 +14,10 @@ extraction:
   # Output directory for data files
   output_dir: "data"
   # Batch size for large queries (number of records per batch)
+  # Smaller batch size for memory efficiency with large datasets
   batch_size: 10000
+  # Whether to clean up individual batch files after consolidation
+  cleanup_batch_files: false
   # Date range for job extraction (optional, leave empty for all jobs)
   start_date: null  # Format: "YYYY-MM-DD" or null for no limit
   end_date: null    # Format: "YYYY-MM-DD" or null for no limit

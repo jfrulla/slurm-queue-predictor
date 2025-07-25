@@ -14,14 +14,17 @@ def main():
     # Initialize extractor with config file
     extractor = SlurmDataExtractor("config.yaml")
     
-    # Option 1: Run complete extraction process
-    print("Running complete extraction process...")
+    # Option 1: Run chunked extraction (memory-efficient, resumable)
+    print("Running chunked extraction process...")
     extractor.run_extraction()
     
-    # Option 2: Step-by-step extraction (for more control)
+    # Option 2: Run with consolidation (creates single file + batch files)
+    # extractor.run_extraction(consolidate=True)
+    
+    # Option 3: Step-by-step extraction (for more control)
     # extractor.connect_to_database()
-    # df = extractor.extract_job_data()
-    # extractor.save_data(df, "custom_filename.parquet")
+    # batch_files = extractor.extract_job_data_chunked("custom_filename")
+    # extractor.consolidate_batch_files(batch_files, "final_output.parquet")
 
 if __name__ == "__main__":
     main() 

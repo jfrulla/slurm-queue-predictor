@@ -10,6 +10,7 @@ import os
 import sys
 import logging
 import argparse
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -164,106 +165,229 @@ class SlurmDataExtractor:
         
         return base_query
     
-    def extract_job_data(self) -> pd.DataFrame:
-        """Extract job data from SLURM database."""
+    def get_total_record_count(self) -> int:
+        """Get total number of records to be extracted."""
+        if not self.engine:
+            raise RuntimeError("Database connection not established.")
+        
+        db_config = self.config['database']
+        cluster_name = db_config.get('cluster_name', 'cluster')
+        job_table = f"{cluster_name}_job_table"
+        
+        count_query = f"SELECT COUNT(*) as total FROM {job_table} WHERE deleted = 0"
+        
+        # Add date filtering if specified
+        extraction_config = self.config.get('extraction', {})
+        conditions = []
+        
+        if extraction_config.get('start_date'):
+            conditions.append(f"time_submit >= UNIX_TIMESTAMP('{extraction_config['start_date']}')")
+        
+        if extraction_config.get('end_date'):
+            conditions.append(f"time_submit <= UNIX_TIMESTAMP('{extraction_config['end_date']}')")
+        
+        if conditions:
+            count_query += " AND " + " AND ".join(conditions)
+        
+        try:
+            result = pd.read_sql(count_query, self.engine)
+            return int(result.iloc[0]['total'])
+        except SQLAlchemyError as e:
+            self.logger.error(f"Error getting record count: {e}")
+            raise
+
+    def load_checkpoint(self, checkpoint_file: Path) -> Dict[str, Any]:
+        """Load extraction checkpoint from file."""
+        if checkpoint_file.exists():
+            try:
+                with open(checkpoint_file, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                self.logger.warning(f"Could not load checkpoint: {e}")
+        return {'offset': 0, 'total_extracted': 0, 'batch_files': []}
+
+    def save_checkpoint(self, checkpoint_file: Path, offset: int, total_extracted: int, batch_files: list):
+        """Save extraction checkpoint to file."""
+        checkpoint_data = {
+            'offset': offset,
+            'total_extracted': total_extracted,
+            'batch_files': batch_files,
+            'timestamp': datetime.now().isoformat()
+        }
+        try:
+            with open(checkpoint_file, 'w') as f:
+                json.dump(checkpoint_data, f, indent=2)
+        except IOError as e:
+            self.logger.warning(f"Could not save checkpoint: {e}")
+
+    def extract_job_data_chunked(self, output_filename: Optional[str] = None) -> list:
+        """Extract job data in memory-efficient chunks with resume capability."""
         if not self.engine:
             raise RuntimeError("Database connection not established. Call connect_to_database() first.")
         
-        query = self.get_job_data_query()
-        batch_size = self.config.get('extraction', {}).get('batch_size', 10000)
-        
-        self.logger.info("Starting job data extraction...")
-        
-        try:
-            # For large datasets, we might want to use chunking
-            chunks = []
-            offset = 0
-            
-            while True:
-                chunked_query = f"{query} LIMIT {batch_size} OFFSET {offset}"
-                self.logger.debug(f"Executing query with offset {offset}")
-                
-                chunk = pd.read_sql(chunked_query, self.engine)
-                
-                if chunk.empty:
-                    break
-                
-                chunks.append(chunk)
-                offset += batch_size
-                
-                self.logger.info(f"Extracted {len(chunk)} records (total: {offset})")
-            
-            if not chunks:
-                self.logger.warning("No job data found")
-                return pd.DataFrame()
-            
-            df = pd.concat(chunks, ignore_index=True)
-            self.logger.info(f"Successfully extracted {len(df)} total job records")
-            
-            return df
-            
-        except SQLAlchemyError as e:
-            self.logger.error(f"Error extracting job data: {e}")
-            raise
-    
-
-    
-    def save_data(self, df: pd.DataFrame, filename: Optional[str] = None):
-        """Save extracted data to file."""
-        if df.empty:
-            self.logger.warning("No data to save")
-            return
-        
+        # Setup parameters
         extraction_config = self.config.get('extraction', {})
+        batch_size = extraction_config.get('batch_size', 5000)  # Smaller default for memory efficiency
         output_dir = Path(extraction_config.get('output_dir', 'data'))
         output_format = extraction_config.get('output_format', 'parquet')
         
         # Create output directory
         output_dir.mkdir(exist_ok=True)
         
-        # Generate filename if not provided
-        if not filename:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"slurm_jobs_{timestamp}.{output_format}"
+        # Setup checkpoint file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_filename = output_filename or f"slurm_jobs_{timestamp}"
+        checkpoint_file = output_dir / f"{base_filename}_checkpoint.json"
         
-        output_path = output_dir / filename
+        # Load checkpoint if exists
+        checkpoint = self.load_checkpoint(checkpoint_file)
+        start_offset = checkpoint['offset']
+        total_extracted = checkpoint['total_extracted']
+        batch_files = checkpoint['batch_files']
+        
+        if start_offset > 0:
+            self.logger.info(f"Resuming extraction from offset {start_offset} ({total_extracted} records already extracted)")
+        
+        # Get total record count
+        total_records = self.get_total_record_count()
+        self.logger.info(f"Total records to extract: {total_records:,}")
+        
+        query = self.get_job_data_query()
         
         try:
-            if output_format == 'csv':
-                df.to_csv(output_path, index=False)
-            elif output_format == 'parquet':
-                df.to_parquet(output_path, index=False)
-            elif output_format == 'json':
-                df.to_json(output_path, orient='records', date_format='iso')
-            else:
-                raise ValueError(f"Unsupported output format: {output_format}")
+            offset = start_offset
+            batch_number = len(batch_files)
             
-            self.logger.info(f"Data saved to {output_path}")
-            self.logger.info(f"Saved {len(df)} records in {output_format} format")
+            while offset < total_records:
+                chunked_query = f"{query} LIMIT {batch_size} OFFSET {offset}"
+                self.logger.info(f"Extracting batch {batch_number + 1}: offset {offset:,} (Progress: {(offset/total_records)*100:.1f}%)")
+                
+                chunk = pd.read_sql(chunked_query, self.engine)
+                
+                if chunk.empty:
+                    self.logger.info("No more data to extract")
+                    break
+                
+                # Save this batch to file
+                batch_filename = f"{base_filename}_batch_{batch_number:04d}.{output_format}"
+                batch_path = output_dir / batch_filename
+                
+                if output_format == 'csv':
+                    chunk.to_csv(batch_path, index=False)
+                elif output_format == 'parquet':
+                    chunk.to_parquet(batch_path, index=False)
+                elif output_format == 'json':
+                    chunk.to_json(batch_path, orient='records', date_format='iso')
+                
+                batch_files.append(str(batch_filename))
+                records_in_batch = len(chunk)
+                total_extracted += records_in_batch
+                offset += batch_size
+                batch_number += 1
+                
+                self.logger.info(f"Saved batch {batch_number} to {batch_filename} ({records_in_batch:,} records)")
+                
+                # Save checkpoint after each batch
+                self.save_checkpoint(checkpoint_file, offset, total_extracted, batch_files)
+                
+                # Clear chunk from memory
+                del chunk
+            
+            self.logger.info(f"Extraction completed! Total records extracted: {total_extracted:,}")
+            self.logger.info(f"Created {len(batch_files)} batch files")
+            
+            # Clean up checkpoint file on successful completion
+            if checkpoint_file.exists():
+                checkpoint_file.unlink()
+                self.logger.info("Removed checkpoint file (extraction completed successfully)")
+            
+            return batch_files
             
         except Exception as e:
-            self.logger.error(f"Error saving data: {e}")
+            self.logger.error(f"Error during chunked extraction: {e}")
+            self.logger.info(f"Checkpoint saved. Resume with same command to continue from offset {offset}")
             raise
     
-    def run_extraction(self, output_filename: Optional[str] = None):
-        """Run the complete data extraction process."""
+
+    
+    def consolidate_batch_files(self, batch_files: list, final_filename: Optional[str] = None):
+        """Consolidate multiple batch files into a single file (optional)."""
+        if not batch_files:
+            self.logger.warning("No batch files to consolidate")
+            return
+        
+        extraction_config = self.config.get('extraction', {})
+        output_dir = Path(extraction_config.get('output_dir', 'data'))
+        output_format = extraction_config.get('output_format', 'parquet')
+        
+        if not final_filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            final_filename = f"slurm_jobs_consolidated_{timestamp}.{output_format}"
+        
+        final_path = output_dir / final_filename
+        
+        self.logger.info(f"Consolidating {len(batch_files)} batch files into {final_filename}")
+        
         try:
-            self.logger.info("Starting SLURM data extraction process")
+            # Read and concatenate all batch files
+            chunks = []
+            for batch_file in batch_files:
+                batch_path = output_dir / batch_file
+                if output_format == 'csv':
+                    chunk = pd.read_csv(batch_path)
+                elif output_format == 'parquet':
+                    chunk = pd.read_parquet(batch_path)
+                elif output_format == 'json':
+                    chunk = pd.read_json(batch_path, orient='records')
+                chunks.append(chunk)
+            
+            # Concatenate all chunks
+            df = pd.concat(chunks, ignore_index=True)
+            
+            # Save consolidated file
+            if output_format == 'csv':
+                df.to_csv(final_path, index=False)
+            elif output_format == 'parquet':
+                df.to_parquet(final_path, index=False)
+            elif output_format == 'json':
+                df.to_json(final_path, orient='records', date_format='iso')
+            
+            self.logger.info(f"Consolidated file saved: {final_path} ({len(df):,} total records)")
+            
+            # Optionally remove batch files
+            cleanup = extraction_config.get('cleanup_batch_files', False)
+            if cleanup:
+                for batch_file in batch_files:
+                    batch_path = output_dir / batch_file
+                    if batch_path.exists():
+                        batch_path.unlink()
+                self.logger.info("Cleaned up individual batch files")
+            
+        except Exception as e:
+            self.logger.error(f"Error consolidating batch files: {e}")
+            raise
+    
+    def run_extraction(self, output_filename: Optional[str] = None, consolidate: bool = False):
+        """Run the complete data extraction process using chunked extraction."""
+        try:
+            self.logger.info("Starting SLURM chunked data extraction process")
             
             # Connect to database
             self.connect_to_database()
             
-            # Extract data
-            df = self.extract_job_data()
+            # Extract data in chunks
+            batch_files = self.extract_job_data_chunked(output_filename)
             
-            if df.empty:
+            if not batch_files:
                 self.logger.warning("No data extracted")
                 return
             
-            # Save raw data
-            self.save_data(df, output_filename)
+            # Optionally consolidate batch files
+            if consolidate:
+                self.consolidate_batch_files(batch_files, output_filename)
             
             self.logger.info("Data extraction process completed successfully")
+            self.logger.info(f"Output files: {len(batch_files)} batch files in data/ directory")
             
         except Exception as e:
             self.logger.error(f"Data extraction failed: {e}")
@@ -290,6 +414,11 @@ def main():
         action="store_true", 
         help="Test database connection without extracting data"
     )
+    parser.add_argument(
+        "--consolidate", 
+        action="store_true", 
+        help="Consolidate batch files into single file after extraction"
+    )
     
     args = parser.parse_args()
     
@@ -298,9 +427,11 @@ def main():
         
         if args.dry_run:
             extractor.connect_to_database()
+            total_records = extractor.get_total_record_count()
             print("✓ Database connection successful")
+            print(f"✓ Total records found: {total_records:,}")
         else:
-            extractor.run_extraction(args.output)
+            extractor.run_extraction(args.output, args.consolidate)
             
     except Exception as e:
         print(f"Error: {e}")
