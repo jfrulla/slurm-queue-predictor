@@ -13,8 +13,7 @@ extraction:
   output_format: "parquet"
   # Output directory for data files
   output_dir: "data"
-  # Batch size for large queries (number of records per batch)
-  # Smaller batch size for memory efficiency with large datasets
+  # Batch size for splitting up the SQL queries
   batch_size: 10000
   # Whether to clean up individual batch files after consolidation
   cleanup_batch_files: false
