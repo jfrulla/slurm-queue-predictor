@@ -23,7 +23,7 @@ def main():
     
     # Option 3: Step-by-step extraction (for more control)
     # extractor.connect_to_database()
-    # batch_files = extractor.extract_job_data_chunked("custom_filename")
+    # batch_files = extractor.extract_job_data_chunked("custom_filename", "custom_checkpoint.json")
     # extractor.consolidate_batch_files(batch_files, "final_output.parquet")
 
 if __name__ == "__main__":

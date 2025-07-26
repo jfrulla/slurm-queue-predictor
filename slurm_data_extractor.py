@@ -220,14 +220,14 @@ class SlurmDataExtractor:
         except IOError as e:
             self.logger.warning(f"Could not save checkpoint: {e}")
 
-    def extract_job_data_chunked(self, output_filename: Optional[str] = None) -> list:
-        """Extract job data in memory-efficient chunks with resume capability."""
+    def extract_job_data_chunked(self, output_filename: Optional[str] = None, checkpoint_file: Optional[str] = None) -> list:
+        """Extract job data in checkpointable chunks"""
         if not self.engine:
             raise RuntimeError("Database connection not established. Call connect_to_database() first.")
         
         # Setup parameters
         extraction_config = self.config.get('extraction', {})
-        batch_size = extraction_config.get('batch_size', 5000)  # Smaller default for memory efficiency
+        batch_size = extraction_config.get('batch_size', 5000) # default to batch size of 5000
         output_dir = Path(extraction_config.get('output_dir', 'data'))
         output_format = extraction_config.get('output_format', 'parquet')
         
@@ -235,18 +235,21 @@ class SlurmDataExtractor:
         output_dir.mkdir(exist_ok=True)
         
         # Setup checkpoint file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        base_filename = output_filename or f"slurm_jobs_{timestamp}"
-        checkpoint_file = output_dir / f"{base_filename}_checkpoint.json"
+        base_filename = output_filename or "slurm_jobs"
+        if checkpoint_file:
+            checkpoint_path = Path(checkpoint_file)
+        else:
+            checkpoint_path = output_dir / f"{base_filename}_checkpoint.json"
         
         # Load checkpoint if exists
-        checkpoint = self.load_checkpoint(checkpoint_file)
+        checkpoint = self.load_checkpoint(checkpoint_path)
         start_offset = checkpoint['offset']
         total_extracted = checkpoint['total_extracted']
         batch_files = checkpoint['batch_files']
         
         if start_offset > 0:
             self.logger.info(f"Resuming extraction from offset {start_offset} ({total_extracted} records already extracted)")
+            self.logger.info(f"Using checkpoint file: {checkpoint_path}")
         
         # Get total record count
         total_records = self.get_total_record_count()
@@ -288,7 +291,7 @@ class SlurmDataExtractor:
                 self.logger.info(f"Saved batch {batch_number} to {batch_filename} ({records_in_batch:,} records)")
                 
                 # Save checkpoint after each batch
-                self.save_checkpoint(checkpoint_file, offset, total_extracted, batch_files)
+                self.save_checkpoint(checkpoint_path, offset, total_extracted, batch_files)
                 
                 # Clear chunk from memory
                 del chunk
@@ -297,8 +300,8 @@ class SlurmDataExtractor:
             self.logger.info(f"Created {len(batch_files)} batch files")
             
             # Clean up checkpoint file on successful completion
-            if checkpoint_file.exists():
-                checkpoint_file.unlink()
+            if checkpoint_path.exists():
+                checkpoint_path.unlink()
                 self.logger.info("Removed checkpoint file (extraction completed successfully)")
             
             return batch_files
@@ -321,8 +324,7 @@ class SlurmDataExtractor:
         output_format = extraction_config.get('output_format', 'parquet')
         
         if not final_filename:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            final_filename = f"slurm_jobs_consolidated_{timestamp}.{output_format}"
+            final_filename = f"slurm_jobs_consolidated.{output_format}"
         
         final_path = output_dir / final_filename
         
@@ -367,7 +369,7 @@ class SlurmDataExtractor:
             self.logger.error(f"Error consolidating batch files: {e}")
             raise
     
-    def run_extraction(self, output_filename: Optional[str] = None, consolidate: bool = False):
+    def run_extraction(self, output_filename: Optional[str] = None, consolidate: bool = False, checkpoint_file: Optional[str] = None):
         """Run the complete data extraction process using chunked extraction."""
         try:
             self.logger.info("Starting SLURM chunked data extraction process")
@@ -376,7 +378,7 @@ class SlurmDataExtractor:
             self.connect_to_database()
             
             # Extract data in chunks
-            batch_files = self.extract_job_data_chunked(output_filename)
+            batch_files = self.extract_job_data_chunked(output_filename, checkpoint_file)
             
             if not batch_files:
                 self.logger.warning("No data extracted")
@@ -419,6 +421,10 @@ def main():
         action="store_true", 
         help="Consolidate batch files into single file after extraction"
     )
+    parser.add_argument(
+        "--checkpoint", 
+        help="Path to checkpoint file for resuming extraction"
+    )
     
     args = parser.parse_args()
     
@@ -428,10 +434,10 @@ def main():
         if args.dry_run:
             extractor.connect_to_database()
             total_records = extractor.get_total_record_count()
-            print("✓ Database connection successful")
-            print(f"✓ Total records found: {total_records:,}")
+            print("Database connection successful")
+            print(f"Total records found: {total_records:,}")
         else:
-            extractor.run_extraction(args.output, args.consolidate)
+            extractor.run_extraction(args.output, args.consolidate, args.checkpoint)
             
     except Exception as e:
         print(f"Error: {e}")
