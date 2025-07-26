@@ -11,8 +11,8 @@ database:
 extraction:
   # Output file format: 'csv', 'parquet', or 'json'
   output_format: "parquet"
-  # Output directory for data files
-  output_dir: "data"
+  # Output directory for raw data files
+  output_dir: "data/raw"
   # Batch size for splitting up the SQL queries
   batch_size: 10000
   # Whether to clean up individual batch files after consolidation
@@ -20,6 +20,21 @@ extraction:
   # Date range for job extraction (optional, leave empty for all jobs)
   start_date: null  # Format: "YYYY-MM-DD" or null for no limit
   end_date: null    # Format: "YYYY-MM-DD" or null for no limit
+
+# Data preprocessing settings
+preprocessing:
+  # Input directory for raw data files
+  input_dir: "data/raw"
+  # Output directory for processed data files
+  output_dir: "data/preprocessed"
+  # Number of parallel jobs for processing (-1 for all CPU cores)
+  n_jobs: -1
+  # Chunk size for large dataset processing
+  chunk_size: 1000000
+  # Use sacct for accurate cluster state (requires SLURM commands)
+  use_sacct: true
+  # Time buffer in days for sacct queries (to capture jobs running before/after batch timeframe)
+  sacct_buffer_days: 7
 
 # Logging configuration
 logging:
